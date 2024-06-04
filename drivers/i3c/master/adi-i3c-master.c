@@ -884,16 +884,23 @@ static int adi_i3c_master_disable_ibi(struct i3c_dev_desc *dev)
 {
 	struct i3c_master_controller *m = i3c_dev_get_master(dev);
 	struct adi_i3c_master *master = to_adi_i3c_master(m);
+	struct i3c_dev_desc *i3cdev;
+	bool enabled = 0;
 	int ret;
 
 	ret = i3c_master_disec_locked(m, dev->info.dyn_addr,
 				      I3C_CCC_EVENT_SIR);
 
-	writel(REG_IBI_CONFIG_LISTEN | ~REG_IBI_CONFIG_ENABLE,
-	       master->regs + REG_IBI_CONFIG);
-
-	writel(readl(master->regs + REG_IRQ_MASK) | ~IRQ_PENDING_IBI_PENDING,
-	       master->regs + REG_IRQ_MASK);
+	i3c_bus_for_each_i3cdev(&m->bus, i3cdev) {
+		if (dev != i3cdev && i3cdev->ibi)
+			enabled |= i3cdev->ibi->enabled;
+	}
+	if (!enabled) {
+		writel(REG_IBI_CONFIG_LISTEN | ~REG_IBI_CONFIG_ENABLE,
+		       master->regs + REG_IBI_CONFIG);
+		writel(readl(master->regs + REG_IRQ_MASK) | ~IRQ_PENDING_IBI_PENDING,
+		       master->regs + REG_IRQ_MASK);
+	}
 
 	return ret;
 }
