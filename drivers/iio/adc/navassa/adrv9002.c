@@ -598,11 +598,9 @@ static int adrv9002_mcs_show(struct adrv9002_rf_phy *phy, char *buf)
 	if (!phy->curr_profile->sysConfig.mcsMode)
 		return sysfs_emit(buf, "%s\n", adrv9002_mcs_modes[0]);
 
-	scoped_guard(mutex, &phy->lock) {
-		ret = api_call(phy, adi_adrv9001_Radio_State_Get, &radio_st);
-		if (ret)
-			return ret;
-	}
+	ret = api_call(phy, adi_adrv9001_Radio_State_Get, &radio_st);
+	if (ret)
+		return ret;
 
 	/* paranoid sanity check */
 	if (radio_st.mcsState > ADI_ADRV9001_ARMMCSSTATES_DONE)
