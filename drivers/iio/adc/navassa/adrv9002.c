@@ -583,6 +583,34 @@ static const char * const adrv9002_init_cals_modes[] = {
 	"run"
 };
 
+static const char * const adrv9002_mcs_modes[] = {
+	"mcs_disabled",
+	"mcs_ready",
+	"mcs_transitioning",
+	"mcs_done",
+};
+
+static int adrv9002_mcs_show(struct adrv9002_rf_phy *phy, char *buf)
+{
+	struct adi_adrv9001_RadioState radio_st;
+	int ret;
+
+	if (!phy->curr_profile->sysConfig.mcsMode)
+		return sysfs_emit(buf, "%s\n", adrv9002_mcs_modes[0]);
+
+	scoped_guard(mutex, &phy->lock) {
+		ret = api_call(phy, adi_adrv9001_Radio_State_Get, &radio_st);
+		if (ret)
+			return ret;
+	}
+
+	/* paranoid sanity check */
+	if (radio_st.mcsState > ADI_ADRV9001_ARMMCSSTATES_DONE)
+		return -EIO;
+
+	return sysfs_emit(buf, "%s\n", adrv9002_mcs_modes[radio_st.mcsState + 1]);
+}
+
 static ssize_t adrv9002_attr_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct iio_dev *indio_dev = dev_to_iio_dev(dev);
@@ -599,6 +627,8 @@ static ssize_t adrv9002_attr_show(struct device *dev, struct device_attribute *a
 		return sysfs_emit(buf, "%s\n", adrv9002_init_cals_modes[phy->run_cals]);
 	case ADRV9002_WARMBOOT_SEL:
 		return sysfs_emit(buf, "%s\n", phy->warm_boot.coeffs_name);
+	case ADRV9002_MCS:
+		return adrv9002_mcs_show(phy, buf);
 	default:
 		return -EINVAL;
 	}
@@ -772,62 +802,6 @@ static int adrv9002_fh_set(const struct adrv9002_rf_phy *phy, const char *buf, u
 	}
 }
 
-static int adrv9002_mcs_run(struct adrv9002_rf_phy *phy, const char *buf)
-{
-	adi_adrv9001_RadioState_t radio = {0};
-	unsigned int i;
-	int ret, tmp;
-
-	if (!phy->curr_profile->sysConfig.mcsMode) {
-		dev_err(&phy->spi->dev, "Multi chip sync not enabled\n");
-		return -ENOTSUPP;
-	}
-
-	if (phy->mcs_run) {
-		/*
-		 * !\FIXME: Ugly hack but MCS only runs successful once and then always fails
-		 * (get's stuck). Hence let's just not allow running more than once and print
-		 * something so people can see this is a known thing.
-		 */
-		dev_err(&phy->spi->dev, "Multi chip sync can only run once for now...\n");
-		return -EPERM;
-	}
-
-	/* all channels need to be in calibrated state...*/
-	for (i = 0; i < ARRAY_SIZE(phy->channels); i++) {
-		struct adrv9002_chan *c = phy->channels[i];
-
-		ret = adrv9002_channel_to_state(phy, c, ADI_ADRV9001_CHANNEL_CALIBRATED, true);
-		if (ret)
-			return ret;
-	}
-
-	ret = api_call(phy, adi_adrv9001_Radio_ToMcsReady);
-	if (ret)
-		return ret;
-
-	tmp = read_poll_timeout(adi_adrv9001_Radio_State_Get, ret,
-				ret || (radio.mcsState == ADI_ADRV9001_ARMMCSSTATES_DONE),
-				20 * USEC_PER_MSEC, 10 * USEC_PER_SEC, false, phy->adrv9001,
-				&radio);
-	if (ret)
-		return __adrv9002_dev_err(phy, __func__, __LINE__);
-	if (tmp)
-		return tmp;
-
-	phy->mcs_run = true;
-
-	for (i = 0; i < ARRAY_SIZE(phy->channels); i++) {
-		struct adrv9002_chan *c = phy->channels[i];
-
-		ret = adrv9002_channel_to_state(phy, c, c->cached_state, false);
-		if (ret)
-			return ret;
-	}
-
-	return 0;
-}
-
 static ssize_t adrv9002_attr_store(struct device *dev, struct device_attribute *attr,
 				   const char *buf, size_t len)
 {
@@ -843,9 +817,6 @@ static ssize_t adrv9002_attr_store(struct device *dev, struct device_attribute *
 		break;
 	case ADRV9002_WARMBOOT_SEL:
 		ret = adrv9002_warm_boot_name_save(phy, buf);
-		break;
-	case ADRV9002_MCS:
-		ret = adrv9002_mcs_run(phy, buf);
 		break;
 	default:
 		ret = adrv9002_fh_set(phy, buf, iio_attr->address);
@@ -2646,6 +2617,14 @@ agc_cfg:
 		if (ret)
 			return ret;
 
+		/*
+		 * If MCS enabled, we're supposed to run MCS and receive the pulses
+		 * on the first calibrated state after the init calls. Hence don't
+		 * change the radio state and have the user to explicitly do it.
+		 */
+		if (phy->curr_profile->sysConfig.mcsMode)
+			continue;
+
 		ret = api_call(phy, adi_adrv9001_Radio_Channel_ToState, ADI_RX,
 			       rx->channel.number, state);
 		if (ret)
@@ -2729,6 +2708,15 @@ pin_cfg:
 			return ret;
 
 rf_enable:
+
+		/*
+		 * If MCS enabled, we're supposed to run MCS and receive the pulses
+		 * on the first calibrated state after the init calls. Hence don't
+		 * change the radio state and have the user to explicitly do it.
+		 */
+		if (phy->curr_profile->sysConfig.mcsMode)
+			continue;
+
 		ret = api_call(phy, adi_adrv9001_Radio_Channel_ToState, ADI_TX,
 			       tx->channel.number, state);
 		if (ret)
@@ -3356,6 +3344,12 @@ static int adrv9002_setup(struct adrv9002_rf_phy *phy)
 	ret = adrv9002_init_cals_handle(phy);
 	if (ret)
 		return ret;
+
+	if (phy->curr_profile->sysConfig.mcsMode) {
+		ret = api_call(phy, adi_adrv9001_Radio_ToMcsReady);
+		if (ret)
+			return ret;
+	}
 
 	ret = adrv9002_dpd_ext_path_set(phy);
 	if (ret)
