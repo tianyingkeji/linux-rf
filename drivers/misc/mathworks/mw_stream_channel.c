@@ -774,7 +774,7 @@ static vm_fault_t mwadma_mmap_fault(struct vm_fault *vmf)
     struct page *thisPage;
     unsigned long offset;
     offset = (vmf->pgoff - vma->vm_pgoff) << PAGE_SHIFT;
-    thisPage = virt_to_page(MWDEV_TO_MWIP(mwdev)->mem->start + offset);
+    thisPage = virt_to_page((void *)(MWDEV_TO_MWIP(mwdev)->mem->start + offset));
     get_page(thisPage);
     vmf->page = thisPage;
     return 0;
@@ -815,7 +815,7 @@ static int mwadma_mmap(struct file *fp, struct vm_area_struct *vma)
     switch(vma->vm_pgoff) {
 		case 0:
 			/* mmap the Memory Mapped I/O's base address */
-                        vma->vm_flags |= VM_IO | VM_DONTDUMP;
+			vm_flags_set(vma, VM_IO | VM_DONTDUMP);
 			vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
 			if (remap_pfn_range(vma, vma->vm_start,
 					MWDEV_TO_MWIP(mwdev)->mem->start >> PAGE_SHIFT,

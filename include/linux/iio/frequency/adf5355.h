@@ -49,6 +49,7 @@
  * @clock_shift:		Defines the rate shift (scaling) between the kernel
  * 			clock framework and the driver.
  * 			(max ADF5355 rate in Hz > ULONG_MAX)
+ * @lock_detect:	Pll lock detection.
  *
  */
 
@@ -79,7 +80,7 @@
 
 	u32			clock_shift;
 
- 	int			gpio_lock_detect;
+ 	struct			gpio_desc *lock_detect;
  };
 
 #endif /* IIO_PLL_ADF5355_H_ */
