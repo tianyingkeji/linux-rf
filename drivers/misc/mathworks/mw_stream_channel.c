@@ -1082,7 +1082,7 @@ static void mw_stream_chan_release(struct device *dev)
 {
 	struct mwadma_chan* mwchan = STREAMDEV_TO_MWCHAN(dev);
 	dev_dbg(dev, "Freeing scatter channel dma memory\n");
-	if ( (mwchan->scatter !=NULL) && (&mwchan->scatter->list != NULL))
+	if ( (mwchan->scatter !=NULL) && (!list_empty(&mwchan->scatter->list)))
 	{
 		mwadma_free_channel(mwchan->mwdev, mwchan);
 	}

@@ -341,12 +341,10 @@ static void mathworks_ip_remove_cdev(void *opaque){
 	struct mathworks_ip_info *thisIpcore = opaque;
 
 	sysfs_remove_file(&thisIpcore->dev->kobj, &dev_attr_fpga_irq_0.attr);
-	if(&thisIpcore->cdev)
-	{
-		dev_info(thisIpcore->dev, "Destroy character dev\n");
-		device_destroy(mathworks_ip_class, thisIpcore->dev_id);
-		cdev_del(&thisIpcore->cdev);
-	}
+
+	dev_info(thisIpcore->dev, "Destroy character dev\n");
+	device_destroy(mathworks_ip_class, thisIpcore->dev_id);
+	cdev_del(&thisIpcore->cdev);
 
 	if (thisIpcore->dev_info){
 		thisIpcore->dev_info->devcnt--;

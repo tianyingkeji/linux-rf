@@ -381,7 +381,7 @@ static const struct adp5589_kpad_platform_data adp5589_default_pdata = {
 static const struct adp5589_kpad_platform_data *adp5589_kpad_pdata_get(
 	struct device *dev)
 {
-	const struct adp5589_kpad_platform_data *pdata = adp5589_kpad_pdata_get(dev);
+	const struct adp5589_kpad_platform_data *pdata = dev_get_platdata(dev);
 
 	if (!pdata)
 		pdata = &adp5589_default_pdata;

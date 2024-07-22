@@ -1021,7 +1021,7 @@ static int mw_sharedmem_iio_probe(
 		return PTR_ERR(mwregion);
 	} else {
 		/* If region size is >= 1 MB, display size as MB */
-		if (mwregion->region.size >= (2^20)){
+		if (mwregion->region.size >= BIT(20)) {
 			size_disp = mwregion->region.size >> 20;
 		}
 		/* Otherwise display as kB */
