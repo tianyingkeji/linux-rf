@@ -4,6 +4,7 @@
  *
  * Copyright 2017 Analog Devices Inc.
  */
+#include "linux/byteorder/little_endian.h"
 #include <linux/bitfield.h>
 #include <linux/clk.h>
 #include <linux/delay.h>
@@ -20,7 +21,7 @@
 #include <linux/regulator/consumer.h>
 #include <linux/sysfs.h>
 #include <linux/spi/spi.h>
-#include <linux/spi/spi-engine.h>
+#include <linux/spi/spi-engine-ex.h>
 #include <linux/util_macros.h>
 #include <linux/units.h>
 #include <linux/rational.h>
@@ -444,7 +445,7 @@ struct ad7768_state {
 	 */
 	union {
 		unsigned char buf[6];
-		__be32 word;
+		__le32 word;
 		struct {
 			__be32 chan;
 			s64 timestamp;
@@ -458,16 +459,16 @@ static int ad7768_spi_reg_read(struct ad7768_state *st, unsigned int addr,
 	struct spi_transfer xfer = {
 		.rx_buf = st->data.buf,
 		.len = len + 1,
-		.bits_per_word = (len == 3 ? 32 : 16),
 	};
 	unsigned char tx_data[4];
 	int ret;
+
 	tx_data[0] = AD7768_RD_FLAG_MSK(addr);
 	xfer.tx_buf = tx_data;
 	ret = spi_sync_transfer(st->spi, &xfer, 1);
 	if (ret < 0)
 		return ret;
-	*data = (len == 1 ? st->data.buf[0] : st->data.word);
+	*data = (len == 1 ? st->data.buf[1] : cpu_to_be32(st->data.word));
 	return ret;
 }
 
@@ -478,7 +479,6 @@ static int ad7768_spi_reg_write(struct ad7768_state *st,
 	struct spi_transfer xfer = {
 		.rx_buf = st->data.buf,
 		.len = 2,
-		.bits_per_word = 16,
 	};
 	unsigned char tx_data[2];
 	tx_data[0] = AD7768_WR_FLAG_MSK(addr);
@@ -1214,12 +1214,16 @@ static int ad7768_buffer_postenable(struct iio_dev *indio_dev)
 		st->offload_xfer.rx_buf = rx_data;
 		spi_message_init_with_transfers(&st->offload_msg, &st->offload_xfer, 1);
 
-		spi_bus_lock(st->spi->master);
-
-		ret = spi_engine_offload_load_msg(st->spi, &st->offload_msg);
+		ret = spi_optimize_message(st->spi, &st->offload_msg);
 		if (ret < 0)
 			return ret;
-		spi_engine_offload_enable(st->spi, true);
+
+		spi_bus_lock(st->spi->master);
+
+		ret = spi_engine_ex_offload_load_msg(st->spi, &st->offload_msg);
+		if (ret < 0)
+			return ret;
+		spi_engine_ex_offload_enable(st->spi, true);
 	}
 
 	return ret;
@@ -1231,9 +1235,10 @@ static int ad7768_buffer_predisable(struct iio_dev *indio_dev)
 	unsigned int regval;
 
 	if (st->spi_is_dma_mapped) {
-		spi_engine_offload_enable(st->spi, false);
+		spi_engine_ex_offload_enable(st->spi, false);
 		spi_bus_unlock(st->spi->master);
 	}
+	spi_unoptimize_message(&st->offload_msg);
 
 	/*
 	 * To exit continuous read mode, perform a single read of the ADC_DATA
@@ -1445,7 +1450,7 @@ static int ad7768_probe(struct spi_device *spi)
 		return PTR_ERR(st->mclk);
 
 	st->mclk_freq = clk_get_rate(st->mclk);
-	st->spi_is_dma_mapped = spi_engine_offload_supported(spi);
+	st->spi_is_dma_mapped = spi_engine_ex_offload_supported(spi);
 	st->irq = spi->irq;
 	st->vref = regulator_get_voltage(st->regulator);
 
